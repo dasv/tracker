@@ -1,13 +1,13 @@
 #include <Arduino.h>
 #include "wiring_private.h"
-#include <types.h>
-#include <IMU.h>
-#include <GPS.h>
+#include "types.h"
+#include "IMU.h"
+#include "GPS.h"
 #include <SDFat.h>
 #include <TinyGPS++.h>
 #include <IridiumSBD.h>
 #include <RTCZero.h>
-#include <packing.h>
+#include "packing.h"
 
 
 #define error(msg) sd.errorHalt(F(msg))
@@ -16,7 +16,7 @@
 
 #define SERIAL_EN true
 
-#define gpsSerial Serial1
+//#define gpsSerial Serial1
 
 #define GPS_BASE_NAME  "GPS"
 #define INC_BASE_NAME  "INC"
@@ -42,6 +42,10 @@ RTCZero rtc;
 //tiempos de ejecucion
 uint32_t tiempo_corto = 0;
 uint32_t tiempo_largo = 0;
+uint32_t tiempo_act_gps = 0;
+uint32_t tiempo_log_gps = 0;
+uint32_t tiempo_imu = 0; 
+uint32_t tiempo_log_imu = 0;
 
 //struct para guardar datos
 marineData Data;
@@ -52,16 +56,44 @@ char IMUfileName[10] = INC_BASE_NAME;
 char SBDfileName[10] = SBD_BASE_NAME;
 //objetos SD
 SdFat sd;
-const uint8_t chipSelect = SS;
+const uint8_t chipSelect = SDCARD_SS_PIN;
 SdFile file;
 //buffer RX Iridium
 uint8_t SBDbuffer[200];
 static bool messageSent = false;
 
+//contador aperturas fichero IMU
+int imu_counter = 0;
+
+
 
 /**
  * FUNCIONES
  */
+
+//Init Data
+
+void init_data(void) {
+
+	//Value Default
+	Data.new_data.pitchmax = -100000;
+	Data.new_data.rollmax = -100000;
+	Data.new_data.pitchmin = 100000;
+	Data.new_data.rollmin = 100000;
+
+	Data.old_data.heading = 0;
+	Data.old_data.lat = 0;
+	Data.old_data.lon = 0;
+	Data.old_data.pitchmax = -100000;
+	Data.old_data.pitchmin = 100000;
+	Data.old_data.rollmax = -100000;
+	Data.old_data.rollmin = 100000;
+	Data.old_data.temp = 0;
+	Data.old_data.vbatt = 0;
+	Data.old_data.vel = 0;
+    Data.old_data.sat = 0;
+}
+
 //scheduler para tiempos cortos, intervalos en MILISEGUNDOS
 uint32_t scheduler_helper(void (*fptr)(), uint32_t last_time, uint32_t interval) {
 	uint32_t now = millis();
@@ -121,15 +153,30 @@ void initSdFile(char * BASE_NAME, SdFile file) {
 }
 
 void logData(String val, char* fileName) {
+    file.close();
     file.open(fileName, O_WRITE);
     file.println(val);
     file.close();
 }
 
-String IMUdata(void) {
+String GPS_Print(void)
+{
+	String val;
+	val += " Nºsat: "; val += String(Data.new_data.sat,5); val += " ";  //CLO añadimos el nº de satelites usados
+	val += "Lat: "; val += String(Data.new_data.lat,8); val += " ";
+	val += "Long: "; val += String(Data.new_data.lon,8); val += " ";
+	val += "Vel: "; val += String(Data.new_data.vel,4); val += " ";
+	val += "Heading: "; val += String(Data.new_data.heading,4); val += " ";
+	//val += "Temp: "; val += Data.data.temp; val += " ";
+	val += "Volt: "; val += Data.new_data.vbatt; //val += " ";
+    //SerialUSB.println(val);
+	return val;
+}
+
+void IMUdata(void) {
     String val;
     //val += RTC_Time(&rtc); val += ": ";
-    val += GPS_time(&gpsSerial, &gps); val += ": "; //debug cambiamos tiempo rtc por consulta continua al gps
+    val += GPS_time(&Serial1, &gps); val += ": "; //debug cambiamos tiempo rtc por consulta continua al gps
 
 
     val += INCL_Read_XY(&Data, &incSerial); val += " ";
@@ -137,12 +184,30 @@ String IMUdata(void) {
 
 
     // CLO para que imprima en el puerto serie y en la SD datos del GPS
-    GPS_Update(&gpsSerial, &gps, &Data);           // en esta funcion he metido mas valores, satelites, he modificado la velcoidad, etc
-    val += GPS_Print(Data);
+    //GPS_Update(&gpsSerial, &gps, &Data);           // en esta funcion he metido mas valores, satelites, he modificado la velcoidad, etc
+    val += GPS_Print();
 
-    logData(val, IMUfileName);   
+    //logData(val, IMUfileName);   
+
+    //las otras funciones siempre cierran el fichero cada vez que escriben, si está abierto alguno tiene que ser el de la IMU
+    if (file.isOpen()){
+        file.println(val);
+        imu_counter++;
+    }
+    else {
+        file.open(IMUfileName, O_WRITE);
+        file.println(val);
+        imu_counter = 0;
+    }
+    if (imu_counter >= 10) {
+        file.close();
+        imu_counter = 0;
+    }
+
+    	if (SERIAL_EN)
+        SerialUSB.println(val);
     
-    return val;
+   // return val;
 }
 
 void GPS_data(void) {
@@ -155,16 +220,13 @@ void GPS_data(void) {
     }
 
     // CLO para que imprima tambien GPS en el puerto serie
-    GPS_Update(&gpsSerial, &gps, &Data);
+    //GPS_Update(&gpsSerial, &gps, &Data);
     //val += RTC_Time(&rtc); val += ": ";
-    val += GPS_time(&gpsSerial, &gps); val += ": "; //debug cambiamos tiempo rtc por consulta continua al gps
+    val += GPS_time(&Serial1, &gps); val += ": "; //debug cambiamos tiempo rtc por consulta continua al gps
 
-    val += GPS_Print(Data);
+    val += GPS_Print();
 
     logData(val, GPSfileName);
-
-	if (SERIAL_EN)
-        SerialUSB.println(val);
 
 }
 
@@ -405,6 +467,12 @@ void PrintData(void) {
 		SerialUSB.println(" ");
 }
 
+
+
+void GPS_act_aux(void){
+    GPS_Update(&Serial1, &gps, &Data);
+}
+
 void setup() {
     rtc.begin();
    	pinMode(SolarPin, OUTPUT);          // sets the digital pin as outpu  CLO   se usa para activar un reley que corta la corriente de los paneles si la tension es mayor de un valor, unos 13V, para no sobrecargar la bateria.
@@ -412,13 +480,15 @@ void setup() {
     delay(10000);
     SerialUSB.println("begin setup");
 
+    init_data();
+
     //inicialización archivos SD
-    /*initSdFile(GPSfileName, file);
+    initSdFile(GPSfileName, file);
     initSdFile(IMUfileName, file);
-    initSdFile(SBDfileName, file);*/
+    initSdFile(SBDfileName, file);
 
     //inicialización puertos serie
-    gpsSerial.begin(9600); 
+    Serial1.begin(9600); 
 
     incSerial.begin(38400);
     pinPeripheral(0, PIO_SERCOM); //Assign RX function to pin 1
@@ -429,13 +499,22 @@ void setup() {
 	pinPeripheral(5, PIO_SERCOM_ALT); //Assign TX function to pin 3
 }
 
+
 void loop() {
     //tiempo_corto = scheduler_helper(func_corto, tiempo_corto, 1000);
     //tiempo_largo = scheduler_helper_long(send_SBD_prueba, tiempo_largo, 30);
-    SerialUSB.println("loop"); 
+    /*SerialUSB.println("loop"); 
     send_SBD_prueba();
     parse_SBD(SBDbuffer);
-    delay(10000);
+    delay(10000);*/
+
+    tiempo_act_gps = scheduler_helper(GPS_act_aux, tiempo_act_gps, 100);
+    tiempo_log_gps = scheduler_helper(GPS_data, tiempo_log_gps, 1000);
+    tiempo_imu = scheduler_helper(IMUdata, tiempo_imu, 250);
+    //tiempo_log_imu = scheduler_helper()
+    tiempo_largo = scheduler_helper_long(CycleData, tiempo_largo, 300);
+
+
 }
 
 /********************************************************************

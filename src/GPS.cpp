@@ -1,5 +1,5 @@
 #include "types.h"
-#include "GPS.h"
+#include "gps.h"
 #include "RTC_aux.h"
 
 
@@ -18,7 +18,16 @@ void GPS_Update(Uart *gpsSerie, TinyGPSPlus *gps, marineData *Data)
 			gps->encode(gpsSerie->read());
 	} while (millis() - start < 100);   // CLO para asegurar que le da tiempo a leer  se puede forzar hasta 50
 
-
+		// Debug: if we haven't seen lots of data in 5 seconds, something's wrong.
+	/*if (millis() > 10000 && gps->charsProcessed() < 100) // uh oh
+	{
+	SerialUSB.println("ERROR: not getting any GPS data!");
+	// dump the stream to Serial
+	SerialUSB.println("GPS stream dump:");
+	while (true) // infinite loop
+		if (gpsSerie->available() > 0) // any data coming in?
+		SerialUSB.write(gpsSerie->read());
+	}^*/
 
 // CLO comento las 6 filas de debajo
 
@@ -31,7 +40,7 @@ void GPS_Update(Uart *gpsSerie, TinyGPSPlus *gps, marineData *Data)
 	//	count--;
 
 	//}
-		Data->ddmmaa = gps->date.value();
+		Data->ddmmaa = gps->date.value();	
 		Data->hhmmsscc = gps->time.value();
 		Data->new_data.lat = gps->location.lat();
 		Data->new_data.lon = gps->location.lng();
@@ -98,34 +107,23 @@ void sendUBX(Uart *gpsSerie, uint8_t *MSG, uint8_t len) {
 	}
 }
 
-String GPS_Print(marineData Data)
-{
-	String val;
-	val += " Nºsat: "; val += String(Data.new_data.sat,5); val += " ";  //CLO añadimos el nº de satelites usados
-	val += "Lat: "; val += String(Data.new_data.lat,8); val += " ";
-	val += "Long: "; val += String(Data.new_data.lon,8); val += " ";
-	val += "Vel: "; val += String(Data.new_data.vel,4); val += " ";
-	val += "Heading: "; val += String(Data.new_data.heading,4); val += " "; //4 decimales de precisión para qué? El GPS sólo da 2
-	//val += "Temp: "; val += Data.data.temp; val += " ";
-	val += "Volt: "; val += Data.new_data.vbatt; //val += " ";
-	return val;
-}
-
 void GPS_Print_Serie(marineData *Data)
 {
-	SerialUSB.print("GPS.LAT: ");  Serial.println(Data->new_data.lat);
-	SerialUSB.print("GPS.Lon: ");  Serial.println(Data->new_data.lon);
-	SerialUSB.print("GPS.DAY: ");  Serial.print(Data->day);
-	SerialUSB.print(" GPS.MONTH: ");  Serial.print(Data->month);
-	SerialUSB.print(" GPS.YEAR: ");  Serial.println(Data->year);
 
-	SerialUSB.print("GPS.HOUR: ");  Serial.print(Data->hour);
-	SerialUSB.print(" GPS.MINS: ");  Serial.print(Data->mins);
-	SerialUSB.print(" GPS.SECS: ");  Serial.print(Data->secs);
-	SerialUSB.print(" GPS.mS: ");  Serial.println(Data->cc);
+	SerialUSB.print("gps->LAT: ");  Serial.println(Data->new_data.lat);
+	SerialUSB.print("gps->Lon: ");  Serial.println(Data->new_data.lon);
+	SerialUSB.print("gps->DAY: ");  Serial.print(Data->day);
+	SerialUSB.print(" gps->MONTH: ");  Serial.print(Data->month);
+	SerialUSB.print(" gps->YEAR: ");  Serial.println(Data->year);
 
-	SerialUSB.print("GPS.DDMMAA: ");  Serial.println(Data->ddmmaa);
-	SerialUSB.print("GPS.HHMMSSCC: ");  Serial.println(Data->hhmmsscc);
+	SerialUSB.print("gps->HOUR: ");  Serial.print(Data->hour);
+	SerialUSB.print(" gps->MINS: ");  Serial.print(Data->mins);
+	SerialUSB.print(" gps->SECS: ");  Serial.print(Data->secs);
+	SerialUSB.print(" gps->mS: ");  Serial.println(Data->cc);
+
+	SerialUSB.print("gps->DDMMAA: ");  Serial.println(Data->ddmmaa);
+	SerialUSB.print("gps->HHMMSSCC: ");  Serial.println(Data->hhmmsscc);
 }
+
 
 
