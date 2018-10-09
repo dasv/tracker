@@ -7,6 +7,7 @@
 #include <TinyGPS++.h>
 #include <IridiumSBD.h>
 #include <RTCZero.h>
+#include <FlashStorage.h>
 #include "packing.h"
 
 
@@ -34,6 +35,9 @@ Uart modemSerial (&sercom4, 4, 5, SERCOM_RX_PAD_3, UART_TX_PAD_2); // Create the
 //pines sueltos
 static int SolarPin = 8;
 
+//Flag en flash para prevenir enviar múltiples sys ready si hay reinicios encadenados
+FlashStorage(sys_ready_sent, uint8_t);
+
 //periféricos
 IridiumSBD isbd(modemSerial, SLEEP_PIN);
 TinyGPSPlus gps;
@@ -60,6 +64,8 @@ const uint8_t chipSelect = SDCARD_SS_PIN;
 SdFile file;
 //buffer RX Iridium
 uint8_t SBDbuffer[200];
+size_t bufferSize = sizeof(SBDbuffer);
+
 static bool messageSent = false;
 
 //contador aperturas fichero IMU
@@ -262,7 +268,6 @@ void send_SBD(void) {
   
     // Read/Write the first time or if there are any remaining messages
     if (!messageSent || isbd.getWaitingMessageCount() > 0) {
-        size_t bufferSize = sizeof(SBDbuffer);
 
         // First time through send+receive; subsequent loops receive only
         if (!messageSent)
@@ -292,12 +297,15 @@ void send_SBD(void) {
             SerialUSB.println();
             SerialUSB.print("Messages remaining to be retrieved: ");
             SerialUSB.println(isbd.getWaitingMessageCount());
-        }        
+        }
+
+        if(sys_ready_sent.read()) //comprobación antes para evitar escribir flash innecesariamente y ahorrar ciclos
+            sys_ready_sent.write(0);        
     }
     isbd.sleep();
 }
 
-void send_SBD_prueba(void) {
+void send_SBD_SYS_READY(void) {
     uint8_t mensaje[13] = "SYSTEM READY";
     //TODO: comprobar si los datos no son 0 y hay un new y old disponibles para enviar
     int err;
@@ -497,6 +505,13 @@ void setup() {
     modemSerial.begin(19200);
     pinPeripheral(4, PIO_SERCOM_ALT); //Assign RX function to pin 2
 	pinPeripheral(5, PIO_SERCOM_ALT); //Assign TX function to pin 3
+
+    if(!sys_ready_sent.read()){ //comprobación de bandera para no enviar mil mensajes si hay reinicios continuos
+        send_SBD_SYS_READY();
+        sys_ready_sent.write(1);
+    }
+
+    }
 }
 
 
