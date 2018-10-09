@@ -8,6 +8,7 @@
 #include <IridiumSBD.h>
 #include <RTCZero.h>
 #include <FlashStorage.h>
+#include <ArduinoLowPower.h>
 #include "packing.h"
 
 
@@ -22,6 +23,9 @@
 #define GPS_BASE_NAME  "GPS"
 #define INC_BASE_NAME  "INC"
 #define SBD_BASE_NAME  "SBD"
+
+#define WAKE 2
+#define DONE 3
 
 
 /**
@@ -38,6 +42,9 @@ static int SolarPin = 8;
 //Flag en flash para prevenir enviar múltiples sys ready si hay reinicios encadenados
 FlashStorage(sys_ready_sent, uint8_t);
 
+//guardado valor RTC para comprobación de sueño
+uint32_t sleep_end;
+
 //periféricos
 IridiumSBD isbd(modemSerial, SLEEP_PIN);
 TinyGPSPlus gps;
@@ -50,6 +57,10 @@ uint32_t tiempo_act_gps = 0;
 uint32_t tiempo_log_gps = 0;
 uint32_t tiempo_imu = 0; 
 uint32_t tiempo_log_imu = 0;
+
+//frecuencias por configuración externa desde mensaje SBD
+uint8_t freq_trama;
+uint16_t freq_imu;
 
 //struct para guardar datos
 marineData Data;
@@ -252,14 +263,21 @@ void batteryVoltage(void) {
     Data.new_data.vbatt = voltage;
 }
 
-void func_corto(void){
-    SerialUSB.println("corto");
-}
+void goToSleep(uint8_t horas_apagado){
+    sleep_end = rtc.getEpoch() + (horas_apagado * 3600); //epoch en segundos, creo
+    LowPower.sleep();
+    }
 
-void func_largo(void){
-    SerialUSB.println("largo");
-}
+void wakeCheck(void){
+    //reseteamos el watchdog externo
+    digitalWrite(DONE, HIGH);
+    delay(1); //pulso de 100ns necesario, dejamos 1ms por asegurarnos
+    digitalWrite(DONE, LOW);
 
+    if(rtc.getEpoch() < sleep_end) {
+        LowPower.sleep();
+    }
+}
 void send_SBD(void) {
     packer(Data);
     //TODO: comprobar si los datos no son 0 y hay un new y old disponibles para enviar
@@ -360,15 +378,13 @@ void send_SBD_SYS_READY(void) {
  */
 
 void parse_SBD(uint8_t * incoming) {
-    uint8_t mins_apagado;
-    uint8_t freq_trama;
-    uint16_t freq_imu;
+    uint8_t horas_apagado;
 
     if(incoming[0] == 'A' && incoming[3] == 'T' && incoming[6] == 'I') {
-        mins_apagado = incoming[2] - '0'; //convertimos char a int, ya tiene el cast a int implicito
-        mins_apagado += (incoming[1] - '0') * 10;
-        if(mins_apagado > 99)
-            mins_apagado = 99; //comprobacion por paranoia
+    horas_apagado = incoming[2] - '0'; //convertimos char a int, ya tiene el cast a int implicito
+    horas_apagado += (incoming[1] - '0') * 10;
+        if (horas_apagado > 99)
+        horas_apagado = 99; //comprobacion por paranoia
         freq_trama = incoming[5] - '0';
         freq_trama += (incoming[4] - '0') * 10;
         if (freq_trama > 99)
@@ -381,11 +397,14 @@ void parse_SBD(uint8_t * incoming) {
             freq_imu = 10000; //por dejarlo redondo nada más
 
         SerialUSB.print('A');
-        SerialUSB.print(mins_apagado);
+        SerialUSB.print(horas_apagado);
         SerialUSB.print('T');
         SerialUSB.print(freq_trama);
         SerialUSB.print('I');
         SerialUSB.println(freq_imu);
+
+        if (horas_apagado) goToSleep(horas_apagado);
+
     } else {
         SerialUSB.println("received invalid configuration string format");
     }
@@ -481,9 +500,16 @@ void GPS_act_aux(void){
     GPS_Update(&Serial1, &gps, &Data);
 }
 
+
+
+
+
 void setup() {
     rtc.begin();
    	pinMode(SolarPin, OUTPUT);          // sets the digital pin as outpu  CLO   se usa para activar un reley que corta la corriente de los paneles si la tension es mayor de un valor, unos 13V, para no sobrecargar la bateria.
+    pinMode(WAKE, INPUT); //Watchdog WAKE
+    pinMode(DONE, OUTPUT); //Watchdog DONE
+    LowPower.attachInterruptWakeup(WAKE, wakeCheck, HIGH);
     SerialUSB.begin(9600);
     delay(10000);
     SerialUSB.println("begin setup");
@@ -511,7 +537,6 @@ void setup() {
         sys_ready_sent.write(1);
     }
 
-    }
 }
 
 

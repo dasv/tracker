@@ -17,4 +17,4 @@ const char server[] = "vsh.pp.ua";
 const char resource[] = "/TinyGSM/logo.txt";
 const int port = 80;
 
- TinyGsm modem();
+ //TinyGsm modem;
