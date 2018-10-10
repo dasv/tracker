@@ -50,17 +50,16 @@ IridiumSBD isbd(modemSerial, SLEEP_PIN);
 TinyGPSPlus gps;
 RTCZero rtc;
 
-//tiempos de ejecucion
-uint32_t tiempo_corto = 0;
-uint32_t tiempo_largo = 0;
+//tiempos de ejecucion, aquí se guarda la última vez que se ha ejecutado, no tocar
+uint32_t tiempo_trama = 0;
 uint32_t tiempo_act_gps = 0;
 uint32_t tiempo_log_gps = 0;
 uint32_t tiempo_imu = 0; 
 uint32_t tiempo_log_imu = 0;
 
 //frecuencias por configuración externa desde mensaje SBD
-uint8_t freq_trama;
-uint16_t freq_imu;
+uint16_t freq_trama = 300; //en segundos
+uint16_t freq_imu = 250; // en milisegundos
 
 //struct para guardar datos
 marineData Data;
@@ -81,6 +80,9 @@ static bool messageSent = false;
 
 //contador aperturas fichero IMU
 int imu_counter = 0;
+
+//flag envío trama cada dos ciclos de data
+uint8_t sendrdy = 0;
 
 
 
@@ -436,7 +438,12 @@ void CycleData(void) {
     Data.new_data.vbatt = 0;
     Data.new_data.vel = 0;
 
-		//sendrdy++;
+	if (!sendrdy) {
+        sendrdy = 1;
+    } else {
+        send_SBD();
+        sendrdy = 0;
+    }
 }
 
 void PrintData(void) {
@@ -507,9 +514,9 @@ void GPS_act_aux(void){
 void setup() {
     rtc.begin();
    	pinMode(SolarPin, OUTPUT);          // sets the digital pin as outpu  CLO   se usa para activar un reley que corta la corriente de los paneles si la tension es mayor de un valor, unos 13V, para no sobrecargar la bateria.
-    pinMode(WAKE, INPUT); //Watchdog WAKE
-    pinMode(DONE, OUTPUT); //Watchdog DONE
-    LowPower.attachInterruptWakeup(WAKE, wakeCheck, HIGH);
+    //pinMode(WAKE, INPUT); //Watchdog WAKE
+    //pinMode(DONE, OUTPUT); //Watchdog DONE
+    //LowPower.attachInterruptWakeup(WAKE, wakeCheck, HIGH);
     SerialUSB.begin(9600);
     delay(10000);
     SerialUSB.println("begin setup");
@@ -521,6 +528,8 @@ void setup() {
     initSdFile(IMUfileName, file);
     initSdFile(SBDfileName, file);
 
+SerialUSB.println("end sd init");
+
     //inicialización puertos serie
     Serial1.begin(9600); 
 
@@ -531,12 +540,13 @@ void setup() {
     modemSerial.begin(19200);
     pinPeripheral(4, PIO_SERCOM_ALT); //Assign RX function to pin 2
 	pinPeripheral(5, PIO_SERCOM_ALT); //Assign TX function to pin 3
-
+SerialUSB.println("end sercoms init");
     if(!sys_ready_sent.read()){ //comprobación de bandera para no enviar mil mensajes si hay reinicios continuos
+        SerialUSB.println("sending sys ready");
         send_SBD_SYS_READY();
         sys_ready_sent.write(1);
     }
-
+SerialUSB.println("end sys ready");
 }
 
 
@@ -552,7 +562,7 @@ void loop() {
     tiempo_log_gps = scheduler_helper(GPS_data, tiempo_log_gps, 1000);
     tiempo_imu = scheduler_helper(IMUdata, tiempo_imu, 250);
     //tiempo_log_imu = scheduler_helper()
-    tiempo_largo = scheduler_helper_long(CycleData, tiempo_largo, 300);
+    tiempo_trama = scheduler_helper_long(CycleData, tiempo_trama, freq_trama);
 
 
 }

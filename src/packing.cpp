@@ -116,6 +116,7 @@ void packer(marineData Data) {
 	pack_short(Data.old_data.temp * 10, p, 1); p += sizeof(int16_t);
 	pack_short(Data.old_data.vbatt * 10, p, 1); p += sizeof(int16_t);
 
+	/*
 	unsigned int ii;
 	for (ii = 0; ii < 2 * package_size; ii++)
 	{
@@ -125,5 +126,5 @@ void packer(marineData Data) {
 		}
 		SerialUSB.print(packed[ii], HEX);
 	}
-
+	*/
 }
